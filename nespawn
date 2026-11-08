@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+NESPAWN_VERSION="0.1.0"
+NESPAWN_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+NESPAWN_HOME="${NESPAWN_HOME:-$(dirname "$NESPAWN_SELF")}"
+NESPAWN_LIB="$NESPAWN_HOME/lib"
+
+# shellcheck source=lib/core/log.sh
+source "$NESPAWN_LIB/core/log.sh"
+# shellcheck source=lib/core/util.sh
+source "$NESPAWN_LIB/core/util.sh"
+# shellcheck source=lib/core/config.sh
+source "$NESPAWN_LIB/core/config.sh"
+# shellcheck source=lib/core/distro.sh
+source "$NESPAWN_LIB/core/distro.sh"
+
+usage() {
+    cat <<USAGE
+nespawn $NESPAWN_VERSION - compact wrapper for systemd-nspawn
+
+Usage: nespawn <command> [args...]
+
+Commands:
+  create <name> <distro> [release]   Buat container baru (debian, ubuntu, arch, alma)
+      --backend auto|native|lxc      Cara bikin rootfs (default: auto)
+      --network host|veth            Mode jaringan (default: host)
+      --mirror <url>                 Override mirror distro
+      --bundle <a,b,...>             Langsung pasang bundle (docker, podman, ...)
+  start   <name>                     Boot container di background (machinectl)
+  stop    <name>                     Matikan container
+  restart <name>                     Restart container
+  boot    <name>                     Boot container di foreground (console)
+  shell   <name> [user]              Masuk shell container
+  run     <name> -- <cmd...>         Jalankan perintah di dalam container
+  passwd  <name> [user]              Set password user di container
+  enable  <name>                     Autostart container saat host boot
+  disable <name>                     Matikan autostart
+  list                               Tampilkan semua container
+  info    <name>                     Detail satu container
+  remove  <name> [-y]                Hapus container
+  distros                            Tampilkan distro & release yang didukung
+  bundle list                        Daftar bundle (nested container, tools)
+  bundle add <name> <bundle...>      Pasang bundle ke container
+  bundle show <name>                 Bundle yang sudah terpasang
+  tui                                Menu interaktif (wizard create + bundle)
+  help | version
+USAGE
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        -h|--help|help) usage; return 0 ;;
+        -V|--version|version) echo "nespawn $NESPAWN_VERSION"; return 0 ;;
+        rm) cmd=remove ;;
+        ls) cmd=list ;;
+        enter|sh) cmd=shell ;;
+    esac
+
+    local file="$NESPAWN_LIB/cmd/$cmd.sh"
+    [[ "$cmd" =~ ^[a-z]+$ && -f "$file" ]] || { usage >&2; die "perintah tidak dikenal: $cmd"; }
+
+    # shellcheck source=/dev/null
+    source "$file"
+    local needs_root="${CMD_NEEDS_ROOT:-1}"
+    if declare -F "cmd_${cmd}_needs_root" >/dev/null; then
+        if "cmd_${cmd}_needs_root" "$@"; then needs_root=1; else needs_root=0; fi
+    fi
+    ((needs_root == 0)) || ensure_root "$cmd" "$@"
+    "cmd_$cmd" "$@"
+}
+
+main "$@"
